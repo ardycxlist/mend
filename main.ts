@@ -519,7 +519,9 @@ function parseUnified(lines: string[], strict: boolean): EditFn[] {
   while (i < lines.length) {
     const line = lines[i]!;
     if (line.startsWith('diff --git ')) {
-      const m = /^diff --git a\/(\S+) b\/(\S+)\s*$/.exec(line);
+      // Paths may hold spaces: split on the last " b/ " so a space inside
+      // the old path does not cut it short.
+      const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
       if (m === null) throw new UsageFault(`error: parse ${i + 1}`);
       i = parseSection(lines, i + 1, { diffOld: m[1], diffNew: m[2] }, strict, edits);
     } else if (line.startsWith('--- ') && (lines[i + 1] ?? '').startsWith('+++ ')) {
@@ -927,18 +929,18 @@ function runCli(argv: string[]): { code: number; out: string[] } {
   }
   rows.sort((a, b) => byteOrder(a.key, b.key));
   if (!check) {
+    // One pass in byte order, deleting and writing as encountered: a path
+    // created under a path this same patch deletes must see the deletion
+    // first, and a move's old path must still exist when its new path is
+    // written only when the order demands it.
     for (const p of [...tree.now.keys()].sort(byteOrder)) {
       const now = tree.now.get(p)!;
-      if (now === null) continue;
       if (tree.original(p) === now) continue;
-      mkdirSync(dirname(p), { recursive: true });
-      writeFileSync(p, now);
-    }
-    for (const p of [...tree.now.keys()].sort(byteOrder)) {
-      const now = tree.now.get(p)!;
-      if (now !== null) continue;
-      if (tree.original(p) === null) continue;
-      rmSync(p, { force: true });
+      if (now === null) rmSync(p, { force: true });
+      else {
+        mkdirSync(dirname(p), { recursive: true });
+        writeFileSync(p, now);
+      }
     }
   }
   const count = rows.length;
